@@ -1,0 +1,11 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
+Pillow==11.3.0
+# NudeNet 3.4.2 é a versão estável documentada. Fixamos a pilha numérica para
+# evitar incompatibilidades de ABI que podem acontecer quando pip resolve NumPy
+# e ONNX Runtime livremente em imagens slim.
+nudenet==3.4.2
+numpy==1.26.4
+onnxruntime==1.20.1
+opencv-python-headless==4.10.0.84

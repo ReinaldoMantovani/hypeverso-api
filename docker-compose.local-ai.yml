@@ -1,0 +1,174 @@
+# =============================================================================
+# IA do Hypeverso rodando no SEU PC (Windows/Mac/Linux com Docker Desktop).
+#
+# Conecta no MySQL da Hostinger (Remote MySQL liberado para o seu IP) e:
+#  - ai-worker: pega os pedidos do "IA Notícias" do CMS, pesquisa, escreve com o
+#    Ollama e salva rascunhos + imagens direto no banco;
+#  - discovery-worker: gera os embeddings das recomendações "parecidos com...";
+#  - shop-worker: confere preço/estoque/links da Shop a cada N horas;
+#  - moderation-worker + moderator: verifica imagens enviadas por usuários (NudeNet);
+#  - mysql-backup: cópia diária do banco da Hostinger em ./backups;
+#  - ollama: as LLMs (também usadas pelo CMS para escrever os textos da Shop).
+#
+#   cp .env.worker.example .env.worker   (preencha DATABASE_URL da Hostinger)
+#   docker compose -f docker-compose.local-ai.yml --env-file .env.worker up -d --build
+# =============================================================================
+x-worker-env: &worker-env
+  # 'staging': os workers não emitem sessões, então pulam as checagens de produção da API.
+  NODE_ENV: staging
+  DATABASE_URL: ${DATABASE_URL:-}
+  REDIS_URL: ''
+  BULLMQ_ENABLED: 'false'
+  MEILISEARCH_URL: ''
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-worker-local-nao-emite-tokens-0123456789abcdef}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-worker-local-nao-emite-tokens-fedcba9876543210}
+  PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:3000}
+  ASSET_BASE_URL: ${PUBLIC_WEB_URL:-http://localhost:3000}
+  COOKIE_SECURE: 'true'
+  OLLAMA_URL: http://ollama:11434
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:4b-instruct}
+  OLLAMA_FALLBACK_MODELS: ${OLLAMA_FALLBACK_MODELS:-qwen3:1.7b,qwen2.5:3b}
+  SEARXNG_URL: http://searxng:8080
+  ARTICLE_EXTRACTOR_URL: http://extractor:8095
+  AI_NEWS_EXTRACTOR_ENABLED: 'true'
+  AI_NEWS_RSS_FALLBACK_ENABLED: 'true'
+  AI_NEWS_AUTO_PULL_MODEL: 'true'
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-qwen3-embedding:0.6b}
+  EMBEDDING_AUTO_PULL: 'true'
+  TMDB_READ_TOKEN: ${TMDB_READ_TOKEN:-}
+
+services:
+  ollama:
+    image: ollama/ollama:0.40.3
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-1}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      # Só no próprio PC: o CMS (localhost:3001) usa para escrever os textos da Shop.
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "OLLAMA_HOST=127.0.0.1:11434 ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 8s
+      retries: 30
+      start_period: 15s
+    # GPU NVIDIA (opcional, acelera muito). Descomente se tiver placa NVIDIA + drivers:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  searxng:
+    image: searxng/searxng:2026.10.7-6671d89be
+    restart: unless-stopped
+    volumes:
+      - ./docker/searxng-settings.yml:/etc/searxng/settings.yml:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  extractor:
+    build:
+      context: .
+      dockerfile: docker/extractor.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8095:8095"
+
+  ai-worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ["node", "dist/ai-worker.js"]
+    restart: unless-stopped
+    environment:
+      <<: *worker-env
+      AI_NEWS_WORKER_ENABLED: 'true'
+      AI_NEWS_WORKER_HEALTH_PORT: 4010
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      # O CMS lê a saúde da IA aqui (http://localhost:4010/health).
+      - "127.0.0.1:4010:4010"
+
+  discovery-worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ["node", "dist/discovery-worker.js"]
+    restart: unless-stopped
+    environment:
+      <<: *worker-env
+      DISCOVERY_WORKER_HEALTH_PORT: 4020
+      DISCOVERY_POLL_MS: ${DISCOVERY_POLL_MS:-300000}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4020:4020"
+
+  shop-worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ["node", "dist/shop-worker.js"]
+    restart: unless-stopped
+    environment:
+      <<: *worker-env
+      SHOP_WORKER_HEALTH_PORT: 4040
+    ports:
+      - "127.0.0.1:4040:4040"
+
+  moderator:
+    build:
+      context: .
+      dockerfile: docker/moderator.Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8096/health', timeout=5).read()"]
+      interval: 15s
+      timeout: 7s
+      retries: 30
+      start_period: 30s
+
+  moderation-worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ["node", "dist/moderation-worker.js"]
+    restart: unless-stopped
+    environment:
+      <<: *worker-env
+      IMAGE_MODERATION_ENABLED: 'true'
+      IMAGE_MODERATION_URL: http://moderator:8096
+      MODERATION_WORKER_HEALTH_PORT: 4050
+    depends_on:
+      moderator:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4050:4050"
+
+  # Backup diário do MySQL da Hostinger (mariadb-dump funciona com MySQL e MariaDB).
+  mysql-backup:
+    image: mariadb:11.4
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/mysql-backup-loop.sh"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/mysql-backup-loop.sh:/scripts/mysql-backup-loop.sh:ro
+
+volumes:
+  ollama_data:

@@ -1,0 +1,862 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Banco: MySQL/MariaDB da Hostinger (plano Business). Sincronize com `npm run db:push`.
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  MODERATOR
+  EDITOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum PostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum LibraryStatus {
+  WATCHING
+  WANT_TO_WATCH
+  COMPLETED
+  DROPPED
+  READING
+  WANT_TO_READ
+  PLAYING
+  WANT_TO_PLAY
+}
+
+enum NotificationType {
+  FOLLOW
+  COMMENT
+  REPLY
+  REACTION
+  SYSTEM
+  ACHIEVEMENT
+  PREMIUM
+  FOLLOW_ACTIVITY
+  NEWS
+  MEDIA_RELEASE
+}
+
+enum SubscriptionStatus {
+  FREE
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
+enum AiNewsJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+model User {
+  id                  String                   @id @default(cuid())
+  name                String
+  username            String                   @unique
+  email               String                   @unique
+  passwordHash        String
+  avatarUrl           String? @db.VarChar(1024)
+  bio                 String?                  @db.VarChar(600)
+  level               Int                      @default(1)
+  xp                  Int                      @default(0)
+  role                UserRole                 @default(USER)
+  status              UserStatus               @default(ACTIVE)
+  emailVerifiedAt     DateTime?
+  termsAcceptedAt     DateTime?
+  termsVersion        String?
+  totpSecret          String? @db.VarChar(512)
+  totpPendingSecret   String? @db.VarChar(512)
+  totpEnabledAt       DateTime?
+  totpLastStep        Int?
+  totpRecoveryCodes   Json?
+  moderationReputation Int                     @default(0)
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  posts               Post[]                   @relation("PostAuthor")
+  comments            Comment[]
+  commentLikes        CommentLike[]
+  reports             CommentReport[]          @relation("ReportAuthor")
+  favorites           Favorite[]
+  library             LibraryItem[]
+  followers           UserFollow[]             @relation("UserFollowers")
+  following           UserFollow[]             @relation("UserFollowing")
+  communityPosts      CommunityPost[]
+  communityComments   CommunityComment[]
+  communityReactions  CommunityReaction[]
+  notifications       Notification[]           @relation("NotificationRecipient")
+  sentNotifications   Notification[]           @relation("NotificationActor")
+  refreshTokens       RefreshToken[]
+  emailTokens         EmailVerificationToken[]
+  passwordResetTokens PasswordResetToken[]
+  searchHistory       SearchHistory[]
+  interactions        UserInteraction[]
+  achievements        UserAchievement[]
+  subscription        Subscription?
+  analytics           AnalyticsEvent[]
+  aiNewsJobs          AiNewsJob[]
+  newsPreferences     UserNewsCategoryPreference[]
+  mediaReleaseReminders MediaReleaseReminder[]
+  catalogReviews      CatalogReview[]
+  lists               UserList[]
+  threads             DiscussionThread[]
+  threadMessages      ThreadMessage[]
+  pushSubscriptions   PushSubscription[]
+  newsletter          NewsletterSubscription?
+  reportVotes         ReportVote[]
+  shopProducts        ShopProduct[] @relation("ShopProductCreatedBy")
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  mfaVerified Boolean @default(false)
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String? @db.VarChar(500)
+  icon        String?
+  createdAt   DateTime @default(now())
+  posts       Post[]
+  aiNewsJobs  AiNewsJob[]
+  newsSubscribers UserNewsCategoryPreference[]
+}
+
+model Tag {
+  id    String    @id @default(cuid())
+  name  String    @unique
+  slug  String    @unique
+  posts PostTag[]
+}
+
+model Post {
+  id             String            @id @default(cuid())
+  title          String @db.VarChar(255)
+  slug           String            @unique
+  description    String            @db.VarChar(500)
+  content        String            @db.Text
+  coverImageUrl  String? @db.VarChar(1024)
+  categoryId     String
+  authorId       String
+  status         PostStatus        @default(DRAFT)
+  isPremium      Boolean           @default(false)
+  seoTitle       String? @db.VarChar(255)
+  seoDescription String?           @db.VarChar(320)
+  publishedAt    DateTime?
+  scheduledAt    DateTime?
+  viewCount      Int               @default(0)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  category       Category          @relation(fields: [categoryId], references: [id])
+  author         User              @relation("PostAuthor", fields: [authorId], references: [id])
+  tags           PostTag[]
+  comments       Comment[]
+  favorites      Favorite[]
+  interactions   UserInteraction[]
+  analytics      AnalyticsEvent[]
+  aiDraft        AiNewsDraft?
+  embedding      PostEmbedding?
+
+  @@index([status, publishedAt])
+  @@index([categoryId, status])
+}
+
+
+model PostEmbedding {
+  postId      String   @id
+  model       String
+  contentHash String
+  // Vetor do modelo de embeddings salvo como JSON (similaridade calculada na API).
+  embedding   Json
+  updatedAt   DateTime @updatedAt
+  post        Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([updatedAt])
+}
+
+model PostTag {
+  postId String
+  tagId  String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+}
+
+model Comment {
+  id        String          @id @default(cuid())
+  postId    String
+  userId    String
+  parentId  String?
+  content   String @db.Text
+  hiddenAt  DateTime?
+  hiddenReason String? @db.Text
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  post      Post            @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Comment?        @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[]       @relation("CommentReplies")
+  likes     CommentLike[]
+  reports   CommentReport[]
+
+  @@index([postId, createdAt])
+}
+
+model CommentLike {
+  commentId String
+  userId    String
+  createdAt DateTime @default(now())
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId])
+}
+
+model CommentReport {
+  id         String       @id @default(cuid())
+  commentId  String
+  reporterId String
+  reason     String
+  details    String? @db.Text
+  status     ReportStatus @default(OPEN)
+  createdAt  DateTime     @default(now())
+  comment    Comment      @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  reporter   User         @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
+  votes      ReportVote[]
+
+  @@unique([commentId, reporterId])
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId, createdAt])
+}
+
+model LibraryItem {
+  id            String            @id @default(cuid())
+  userId        String
+  externalId    String
+  title         String @db.VarChar(512)
+  mediaType     String
+  coverUrl      String? @db.VarChar(1024)
+  status        LibraryStatus
+  notes         String? @db.Text
+  rating        Int?
+  catalogItemId String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  catalogItem   MediaCatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, externalId, mediaType])
+  @@index([userId, status])
+  @@index([catalogItemId])
+}
+
+model MediaCatalogItem {
+  id            String        @id @default(cuid())
+  provider      String
+  externalId    String
+  mediaType     String
+  title         String @db.VarChar(512)
+  originalTitle String? @db.VarChar(512)
+  slug          String @db.VarChar(512)
+  description   String?       @db.Text
+  coverUrl      String? @db.VarChar(1024)
+  backdropUrl   String? @db.VarChar(1024)
+  releaseDate   DateTime?
+  genres        Json?
+  rating        Float?
+  sourceUrl     String? @db.VarChar(1024)
+  trailerUrl    String? @db.VarChar(1024)
+  metadata      Json?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  libraryItems  LibraryItem[]
+  releaseReminders MediaReleaseReminder[]
+  reviews       CatalogReview[]
+  threads       DiscussionThread[]
+  listItems     UserListItem[]
+
+  @@unique([provider, externalId, mediaType])
+  @@index([mediaType, title])
+  @@index([releaseDate])
+}
+
+
+model MediaReleaseReminder {
+  id               String           @id @default(cuid())
+  userId           String
+  catalogItemId    String
+  remindBeforeDays Int              @default(1)
+  notifiedAt       DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  catalogItem      MediaCatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, catalogItemId])
+  @@index([userId, createdAt])
+  @@index([notifiedAt, catalogItemId])
+}
+
+model UserFollow {
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+}
+
+
+model UserNewsCategoryPreference {
+  userId     String
+  categoryId String
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([userId, categoryId])
+  @@index([categoryId, userId])
+}
+
+model CommunityPost {
+  id        String              @id @default(cuid())
+  userId    String
+  content   String @db.Text
+  imageUrl  String? @db.VarChar(1024)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments  CommunityComment[]
+  reactions CommunityReaction[]
+
+  @@index([createdAt])
+}
+
+model CommunityComment {
+  id              String        @id @default(cuid())
+  communityPostId String
+  userId          String
+  content         String @db.Text
+  createdAt       DateTime      @default(now())
+  post            CommunityPost @relation(fields: [communityPostId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([communityPostId, createdAt])
+}
+
+model CommunityReaction {
+  communityPostId String
+  userId          String
+  kind            String        @default("LIKE")
+  createdAt       DateTime      @default(now())
+  post            CommunityPost @relation(fields: [communityPostId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([communityPostId, userId])
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  recipientId String
+  actorId     String?
+  type        NotificationType
+  title       String @db.VarChar(255)
+  body        String? @db.Text
+  entityType  String?
+  entityId    String?
+  readAt      DateTime?
+  createdAt   DateTime         @default(now())
+  recipient   User             @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor       User?            @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, readAt, createdAt])
+}
+
+model Achievement {
+  id          String            @id @default(cuid())
+  code        String            @unique
+  name        String
+  description String @db.VarChar(500)
+  icon        String?
+  xpReward    Int               @default(0)
+  users       UserAchievement[]
+}
+
+model UserAchievement {
+  userId        String
+  achievementId String
+  unlockedAt    DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@id([userId, achievementId])
+}
+
+model SearchHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  query     String @db.VarChar(255)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model UserInteraction {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String
+  type      String
+  weight    Int      @default(1)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([postId, type])
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  userId               String             @unique
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  status               SubscriptionStatus @default(FREE)
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  userId    String?
+  postId    String?
+  type      String
+  path      String? @db.VarChar(512)
+  referrer  String? @db.VarChar(1024)
+  metadata  Json?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  post      Post?    @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([type, createdAt])
+  @@index([postId, createdAt])
+}
+
+
+model AiNewsJob {
+  id              String          @id @default(cuid())
+  requestedById   String
+  categoryId      String?
+  query           String?
+  status          AiNewsJobStatus @default(PENDING)
+  requestedDrafts Int             @default(1)
+  createdDrafts   Int             @default(0)
+  language        String          @default("pt-BR")
+  timeRange       String          @default("day")
+  model           String
+  attempts        Int             @default(0)
+  stage           String          @default("QUEUED")
+  stageMessage    String? @db.Text
+  progress        Int             @default(0)
+  lastHeartbeatAt DateTime?
+  cancelRequestedAt DateTime?
+  hiddenAt        DateTime?
+  error           String?         @db.Text
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  requestedBy     User            @relation(fields: [requestedById], references: [id], onDelete: Cascade)
+  category        Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  drafts          AiNewsDraft[]
+
+  @@index([status, createdAt])
+  @@index([status, lastHeartbeatAt])
+  @@index([hiddenAt, status, createdAt])
+  @@index([requestedById, createdAt])
+}
+
+model AiNewsDraft {
+  id                   String         @id @default(cuid())
+  jobId                String
+  postId               String         @unique
+  topic                String @db.VarChar(512)
+  coverImageCredit     String? @db.VarChar(1024)
+  coverImageSourceUrl  String? @db.VarChar(1024)
+  inlineImageCredit    String? @db.VarChar(1024)
+  inlineImageSourceUrl String? @db.VarChar(1024)
+  createdAt            DateTime       @default(now())
+  job                  AiNewsJob      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  post                 Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  sources              AiNewsSource[]
+
+  @@index([jobId, createdAt])
+}
+
+model AiNewsSource {
+  id                String      @id @default(cuid())
+  draftId           String
+  title             String @db.VarChar(512)
+  url               String @db.VarChar(512)
+  publisher         String?
+  excerpt           String?     @db.Text
+  sourcePublishedAt DateTime?
+  createdAt         DateTime    @default(now())
+  draft             AiNewsDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@unique([draftId, url])
+  @@index([url])
+}
+
+enum NewsletterStatus {
+  PENDING
+  CONFIRMED
+  UNSUBSCRIBED
+}
+
+enum ThreadKind {
+  EPISODE
+  WATCH_PARTY
+  GENERAL
+}
+
+enum ReportVerdict {
+  VIOLATES
+  OK
+}
+
+model NewsletterSubscription {
+  id                    String           @id @default(cuid())
+  email                 String           @unique
+  userId                String?          @unique
+  categoryIds           Json?
+  status                NewsletterStatus @default(PENDING)
+  confirmTokenHash      String?          @unique
+  confirmTokenExpiresAt DateTime?
+  unsubscribeToken      String           @unique
+  confirmedAt           DateTime?
+  unsubscribedAt        DateTime?
+  lastSentAt            DateTime?
+  consentIp             String? @db.VarChar(64)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  user                  User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+model PushSubscription {
+  id         String    @id @default(cuid())
+  userId     String?
+  endpoint   String    @unique @db.VarChar(512)
+  p256dh     String @db.VarChar(255)
+  auth       String @db.VarChar(255)
+  topics     Json?
+  userAgent  String? @db.VarChar(512)
+  failures   Int       @default(0)
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model CatalogReview {
+  id            String           @id @default(cuid())
+  catalogItemId String
+  userId        String
+  rating        Int
+  title         String?          @db.VarChar(120)
+  body          String? @db.Text
+  spoiler       Boolean          @default(false)
+  hiddenAt      DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  catalogItem   MediaCatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([catalogItemId, userId])
+  @@index([catalogItemId, createdAt])
+}
+
+model DiscussionThread {
+  id            String            @id @default(cuid())
+  catalogItemId String?
+  kind          ThreadKind        @default(GENERAL)
+  title         String            @db.VarChar(160)
+  description   String? @db.Text
+  season        Int?
+  episode       Int?
+  startsAt      DateTime?
+  lockedAt      DateTime?
+  lastMessageAt DateTime?
+  createdById   String
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  catalogItem   MediaCatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  createdBy     User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  messages      ThreadMessage[]
+
+  @@index([catalogItemId, createdAt])
+  @@index([kind, startsAt])
+}
+
+model ThreadMessage {
+  id        String           @id @default(cuid())
+  threadId  String
+  userId    String
+  content   String @db.Text
+  spoiler   Boolean          @default(false)
+  hiddenAt  DateTime?
+  createdAt DateTime         @default(now())
+  thread    DiscussionThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+}
+
+model UserList {
+  id          String         @id @default(cuid())
+  userId      String
+  title       String         @db.VarChar(120)
+  slug        String
+  description String? @db.Text
+  isPublic    Boolean        @default(true)
+  viewCount   Int            @default(0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items       UserListItem[]
+
+  @@unique([userId, slug])
+  @@index([isPublic, updatedAt])
+}
+
+model UserListItem {
+  id            String           @id @default(cuid())
+  listId        String
+  catalogItemId String
+  position      Int              @default(0)
+  note          String?          @db.VarChar(500)
+  createdAt     DateTime         @default(now())
+  list          UserList         @relation(fields: [listId], references: [id], onDelete: Cascade)
+  catalogItem   MediaCatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, catalogItemId])
+  @@index([listId, position])
+}
+
+model ReportVote {
+  id        String        @id @default(cuid())
+  reportId  String
+  userId    String
+  verdict   ReportVerdict
+  weight    Int           @default(1)
+  createdAt DateTime      @default(now())
+  report    CommentReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, userId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Shop: produtos de afiliados exibidos na página /shop do site.
+// O link de afiliado nunca é exibido "cru": o clique passa por /api/shop/go/:id
+// para contabilizar e só então o navegador é enviado à loja.
+// ---------------------------------------------------------------------------
+model ShopProduct {
+  id            String    @id @default(cuid())
+  title         String @db.VarChar(255)
+  slug          String    @unique
+  description   String? @db.Text
+  imageUrl      String? @db.VarChar(1024)
+  affiliateUrl  String @db.VarChar(2048)
+  store         String    @default("Loja parceira")
+  category      String?
+  badge         String?
+  priceCents    Int?
+  originalPriceCents Int?
+  currency      String    @default("BRL")
+  couponCode    String?
+  // Lista curta de destaques (gerada pela IA no CMS ou editada à mão).
+  highlights    Json?
+  featured      Boolean   @default(false)
+  active        Boolean   @default(true)
+  sortOrder     Int       @default(0)
+  clicks        Int       @default(0)
+  lastClickedAt DateTime?
+  // Verificação automática (worker no seu PC): preço, estoque e link quebrado.
+  checkStatus   ShopCheckStatus @default(UNCHECKED)
+  checkMessage  String?   @db.VarChar(500)
+  lastCheckedAt DateTime?
+  priceUpdatedAt DateTime?
+  checkFailures Int       @default(0)
+  // true quando o próprio sistema ocultou (esgotado/link quebrado); volta sozinho quando normalizar.
+  autoHidden    Boolean   @default(false)
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  createdBy     User?     @relation("ShopProductCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  priceHistory  ShopPriceHistory[]
+
+  @@index([active, featured, sortOrder])
+  @@index([checkStatus, lastCheckedAt])
+  @@index([category])
+  @@index([store])
+}
+
+enum ShopCheckStatus {
+  UNCHECKED
+  OK
+  PRICE_CHANGED
+  OUT_OF_STOCK
+  BROKEN
+  BLOCKED
+}
+
+// Histórico de preço (um ponto por mudança) para gráfico e "menor preço".
+model ShopPriceHistory {
+  id                 String      @id @default(cuid())
+  productId          String
+  priceCents         Int?
+  originalPriceCents Int?
+  available          Boolean     @default(true)
+  checkedAt          DateTime    @default(now())
+  product            ShopProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, checkedAt])
+}
+
+// Coleções da Shop (/shop/c/:slug): filtros automáticos + produtos escolhidos à mão.
+model ShopCollection {
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  title         String   @db.VarChar(120)
+  description   String?  @db.Text
+  emoji         String?  @db.VarChar(16)
+  // Filtros (todos opcionais). Produtos que batem com TODOS os filtros entram.
+  category      String?
+  store         String?
+  maxPriceCents Int?
+  onlyDiscount  Boolean  @default(false)
+  // Lista manual de IDs de produtos (sempre entram, na ordem informada).
+  productIds    Json?
+  active        Boolean  @default(true)
+  showOnShop    Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([active, sortOrder])
+}
+
+enum MediaModerationStatus {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ---------------------------------------------------------------------------
+// Arquivos enviados (imagens). Ficam no próprio MySQL porque a Hostinger
+// reconstrói a pasta da aplicação a cada deploy. Servidos em /uploads/:name.
+// ---------------------------------------------------------------------------
+model MediaAsset {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  mimeType  String   @db.VarChar(100)
+  bytes     Int
+  width     Int?
+  height    Int?
+  purpose   String   @default("article") @db.VarChar(40)
+  data      Bytes    @db.MediumBlob
+  // Imagens de usuários (avatar, comunidade, biblioteca) são verificadas pelo worker local (NudeNet).
+  moderationStatus MediaModerationStatus @default(NOT_REQUIRED)
+  moderationScore  Float?
+  moderatedAt      DateTime?
+  uploadedById     String?
+  createdAt DateTime @default(now())
+
+  @@index([purpose, createdAt])
+  @@index([moderationStatus, createdAt])
+}
+
+// Configurações editáveis no CMS (afiliados, textos da Shop, IA...). Valor em JSON por chave.
+model SiteSetting {
+  key       String   @id @db.VarChar(100)
+  value     Json
+  updatedAt DateTime @updatedAt
+}

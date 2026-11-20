@@ -1,0 +1,100 @@
+# =============================================================================
+# Ambiente de TESTES completo no seu PC: MySQL local + API + IA.
+# Use para experimentar antes de publicar (não precisa da Hostinger).
+#
+#   docker compose -f docker-compose.local-ai.yml -f docker-compose.dev.yml up -d --build
+#
+# API: http://localhost:4000 · MySQL: 127.0.0.1:3307 (usuário/senha hypeverso)
+# =============================================================================
+x-dev-db: &dev-db
+  DATABASE_URL: mysql://hypeverso:hypeverso@mysql:3306/hypeverso?connection_limit=5
+  PUBLIC_WEB_URL: http://localhost:3000
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: hypeverso
+      MYSQL_USER: hypeverso
+      MYSQL_PASSWORD: hypeverso
+      MYSQL_ROOT_PASSWORD: hypeverso-root
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--max_allowed_packet=64M"]
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:3307:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uhypeverso -phypeverso --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    # Sincroniza o schema + seed e sobe a API.
+    command: ["sh", "-c", "node scripts/db-sync.mjs && node dist/server.js"]
+    restart: unless-stopped
+    environment:
+      <<: *dev-db
+      NODE_ENV: development
+      API_PORT: 4000
+      DB_SYNC: strict
+      REDIS_URL: ''
+      JWT_ACCESS_SECRET: dev-access-secret-0123456789abcdef0123456789
+      JWT_REFRESH_SECRET: dev-refresh-secret-0123456789abcdef0123456789
+      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
+      GATEWAY_SHARED_SECRET: troque-este-segredo-do-gateway-hypeverso-local
+      MFA_REQUIRED_FOR_STAFF: 'false'
+      COOKIE_SECURE: 'false'
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4000:4000"
+
+  ai-worker:
+    environment:
+      <<: *dev-db
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+
+  discovery-worker:
+    environment:
+      <<: *dev-db
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+
+  shop-worker:
+    environment:
+      <<: *dev-db
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  moderation-worker:
+    environment:
+      <<: *dev-db
+    depends_on:
+      mysql:
+        condition: service_healthy
+      moderator:
+        condition: service_healthy
+
+  mysql-backup:
+    environment:
+      DATABASE_URL: mysql://hypeverso:hypeverso@mysql:3306/hypeverso
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:

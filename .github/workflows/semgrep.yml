@@ -1,0 +1,31 @@
+name: Semgrep
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '41 6 * * 3'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: SAST + segredos + OWASP Top 10
+        run: >
+          semgrep scan
+          --config p/default --config p/typescript --config p/nodejs --config p/react
+          --config p/owasp-top-ten --config p/secrets --config p/dockerfile
+          --exclude node_modules --exclude '**/*.test.ts' --exclude e2e
+          --sarif --output semgrep.sarif --error --severity ERROR
+      - if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
