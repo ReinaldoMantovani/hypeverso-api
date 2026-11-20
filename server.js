@@ -1,3 +1,4 @@
-// Entrada para a Hostinger (Arquivo de entrada: server.js).
-// O código compilado fica em dist/ — rode "npm run build" antes.
-import './dist/server.js';
+import('./dist/server.js').catch((error) => {
+  console.error('[hypeverso-api] Falha ao iniciar a API:', error);
+  process.exit(1);
+});
