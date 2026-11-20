@@ -4,10 +4,28 @@
 // Variáveis: DB_SYNC=off desliga; DB_SYNC=strict faz o build falhar se der erro.
 import { spawnSync } from 'node:child_process';
 
+try {
+  process.loadEnvFile?.('.env');
+} catch {}
+
 const mode = (process.env.DB_SYNC || 'on').toLowerCase();
 if (mode === 'off') {
   console.log('[db-sync] DB_SYNC=off: pulando sincronização do banco.');
   process.exit(0);
+}
+// Mesma correção da API: aspas, espaços, "DATABASE_URL=" no valor, mariadb://.
+if (process.env.DATABASE_URL) {
+  let v = process.env.DATABASE_URL.trim();
+  for (let i = 0; i < 3; i++) {
+    v = v.replace(/^DATABASE_URL\s*=\s*/i, '').trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1).trim();
+  }
+  v = v.replace(/^(mysql|mariadb):\/\//i, 'mysql://');
+  process.env.DATABASE_URL = v;
+  if (!v.startsWith('mysql://')) {
+    const masked = v.replace(/(:\/\/[^:/@]*:)[^@]*@/, '$1****@');
+    console.error(`[db-sync] DATABASE_URL inválida: precisa começar com mysql://. Recebido: "${masked.slice(0, 40)}" (${v.length} caracteres).`);
+  }
 }
 if (!process.env.DATABASE_URL) {
   console.warn('[db-sync] DATABASE_URL não definida no build: pulando. Rode "npm run db:sync" depois.');

@@ -1,4 +1,14 @@
 import { z } from 'zod';
+import { applyDatabaseUrlFix } from './database-url.js';
+
+// Lê o arquivo .env da pasta do projeto (uso no PC). Variáveis já definidas no sistema
+// ou no painel da Hostinger têm prioridade e não são sobrescritas.
+try {
+  process.loadEnvFile?.('.env');
+} catch {
+  // sem .env: segue só com as variáveis do ambiente
+}
+applyDatabaseUrlFix();
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
