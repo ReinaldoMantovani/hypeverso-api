@@ -158,7 +158,7 @@ services:
 
   # Backup diário do MySQL da Hostinger (mariadb-dump funciona com MySQL e MariaDB).
   mysql-backup:
-    image: mariadb:11.4
+    image: mariadb:13.0
     restart: unless-stopped
     entrypoint: ["/bin/bash", "/scripts/mysql-backup-loop.sh"]
     environment:
