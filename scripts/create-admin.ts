@@ -1,4 +1,7 @@
-import argon2 from 'argon2';
+try {
+  process.loadEnvFile?.('.env');
+} catch {}
+import { hashPassword } from '../src/lib/password.js';
 import { PrismaClient } from '@prisma/client';
 
 async function main() {
@@ -15,7 +18,7 @@ async function main() {
   }
 
   try {
-    const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+    const passwordHash = await hashPassword(password);
     await prisma.user.upsert({
       where: { email },
       update: {

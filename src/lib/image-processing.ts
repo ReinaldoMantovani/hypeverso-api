@@ -1,12 +1,23 @@
-import sharp from 'sharp';
 import { rename, unlink } from 'node:fs/promises';
+import type SharpType from 'sharp';
+
+// sharp é carregado só quando alguém envia uma imagem. Assim, se o binário
+// nativo não carregar no servidor, a API continua no ar (só o upload falha).
+let sharpPromise: Promise<typeof SharpType> | undefined;
+function loadSharp() {
+  sharpPromise ??= import('sharp').then((m) => {
+    const sharp = (m.default ?? m) as typeof SharpType;
+    sharp.cache(false);
+    sharp.concurrency(1);
+    return sharp;
+  });
+  return sharpPromise;
+}
 
 // Reprocessa toda imagem enviada: aplica a orientação EXIF, remove TODOS os
 // metadados (GPS, câmera, comentários) e reescreve os pixels. Isso também
 // destrói payloads "polyglot" escondidos após os dados da imagem.
 const MAX_DIMENSION = 4096;
-sharp.cache(false);
-sharp.concurrency(1);
 
 export type ProcessedImage = {
   format: 'jpg' | 'png' | 'webp' | 'gif' | 'avif';
@@ -16,6 +27,7 @@ export type ProcessedImage = {
 };
 
 export async function reencodeImage(path: string, format: ProcessedImage['format']): Promise<ProcessedImage> {
+  const sharp = await loadSharp();
   const animated = format === 'gif' || format === 'webp';
   // limitInputPixels protege contra "decompression bombs".
   let pipeline = sharp(path, { animated, limitInputPixels: 50_000_000, failOn: 'error' })

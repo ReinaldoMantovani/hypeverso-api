@@ -1,4 +1,4 @@
-import argon2 from 'argon2';
+import { hashPassword as hashArgon, verifyPassword as verifyArgon } from './password.js';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../db.js';
@@ -15,9 +15,8 @@ export const CSRF_HEADER = 'x-csrf-token';
 /** Papéis que precisam de 2FA ativo para acessar rotas administrativas. */
 export const MFA_ROLES: Role[] = ['ADMIN', 'EDITOR'];
 
-export const hashPassword = (v: string) =>
-  argon2.hash(v, { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 });
-export const verifyPassword = (hash: string, v: string) => argon2.verify(hash, v);
+export const hashPassword = (v: string) => hashArgon(v);
+export const verifyPassword = (hash: string, v: string) => verifyArgon(hash, v);
 
 const secure = () => env.COOKIE_SECURE === 'true';
 
