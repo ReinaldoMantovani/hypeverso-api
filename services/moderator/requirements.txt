@@ -1,5 +1,5 @@
 fastapi==0.116.1
-uvicorn[standard]==0.35.0
+uvicorn[standard]==0.54.0
 python-multipart==0.0.20
 Pillow==11.3.0
 # NudeNet 3.4.2 é a versão estável documentada. Fixamos a pilha numérica para
