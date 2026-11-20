@@ -1,6 +1,6 @@
 # Imagem usada no SEU PC para os workers de IA (e, no modo dev, para a API).
 # Na Hostinger não há Docker: lá a API roda como Node.js Web App (npm run build / dist/server.js).
-FROM node:22-bookworm-slim
+FROM node:26-bookworm-slim
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
