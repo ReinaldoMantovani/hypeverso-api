@@ -860,3 +860,47 @@ model SiteSetting {
   value     Json
   updatedAt DateTime @updatedAt
 }
+
+// ---------------------------------------------------------------------------
+// Traduções automáticas (IA local no seu PC) de artigos e produtos da Shop.
+// O texto original (pt-BR) continua na própria tabela; aqui ficam as versões
+// em outros idiomas. sourceHash = impressão digital do original usado.
+// ---------------------------------------------------------------------------
+enum TranslationStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+model ContentTranslation {
+  id             String            @id @default(cuid())
+  /// "post" (artigo) ou "shop" (produto da Shop)
+  entityType     String            @db.VarChar(20)
+  entityId       String            @db.VarChar(191)
+  /// "en" ou "es"
+  locale         String            @db.VarChar(8)
+  status         TranslationStatus @default(PENDING)
+  sourceHash     String            @db.VarChar(64)
+  title          String?           @db.VarChar(255)
+  description    String?           @db.Text
+  content        String?           @db.MediumText
+  seoTitle       String?           @db.VarChar(255)
+  seoDescription String?           @db.VarChar(320)
+  /// Campos extras (ex.: destaques da Shop).
+  extra          Json?
+  model          String?           @db.VarChar(80)
+  error          String?           @db.Text
+  attempts       Int               @default(0)
+  /// true quando alguém editou no CMS: a IA não sobrescreve sozinha.
+  manualEdit     Boolean           @default(false)
+  reviewedAt     DateTime?
+  lockedAt       DateTime?
+  translatedAt   DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([entityType, entityId, locale])
+  @@index([status, updatedAt])
+  @@index([entityType, locale, status])
+}

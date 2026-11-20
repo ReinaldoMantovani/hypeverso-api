@@ -1,6 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import sanitizeHtml from 'sanitize-html';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../lib/auth.js';
 import { assertVerifiedEmail } from '../lib/verified-email.js';
@@ -12,6 +11,8 @@ import { notify, notifyFollowersActivity, notifyNewsPublished } from '../service
 import { removePostFromSearchIndex, syncPostToSearchIndex } from '../services/search-index.js';
 import { bullEnabled, enqueueNewsPublished, enqueueSearchRemove, enqueueSearchSync } from '../lib/bullmq.js';
 import { clientIp } from '../lib/client-ip.js';
+import { localesForPosts, localizePost, localizePostList } from '../services/translation.js';
+import { sanitizePostHtml } from '../lib/post-html.js';
 
 const publicSelect = {
   id: true,
@@ -73,18 +74,6 @@ async function queuePostSearchRemove(postId: string, log: any) {
 const CMS_BODY_LIMIT = 20 * 1024 * 1024;
 // Somente players/embeds conhecidos podem aparecer em iframes de artigos. Isso
 // impede que um conteúdo gerado/importado embuta páginas de phishing ou malware.
-const ALLOWED_IFRAME_HOSTS = [
-  'www.youtube.com',
-  'youtube.com',
-  'www.youtube-nocookie.com',
-  'player.vimeo.com',
-  'player.twitch.tv',
-  'clips.twitch.tv',
-  'open.spotify.com',
-  'w.soundcloud.com',
-  'platform.twitter.com',
-  'www.instagram.com',
-];
 const contentRoutes: FastifyPluginAsync = async app => {
   app.get('/categories', async req => {
     const q = z.object({ fresh: z.enum(['1', 'true']).optional() }).parse(req.query);
@@ -100,10 +89,10 @@ const contentRoutes: FastifyPluginAsync = async app => {
   const publishedWhere = () => ({ status: 'PUBLISHED' as const, publishedAt: { lte: new Date() } });
   app.get('/sitemap/posts', async (req, reply) => {
     const { page } = z.object({ page: z.coerce.number().int().min(1).max(1000).default(1) }).parse(req.query);
-    const [items, total] = await Promise.all([
+    const [rawItems, total] = await Promise.all([
       prisma.post.findMany({
         where: publishedWhere(),
-        select: { slug: true, updatedAt: true, publishedAt: true, coverImageUrl: true, title: true },
+        select: { id: true, slug: true, updatedAt: true, publishedAt: true, coverImageUrl: true, title: true },
         orderBy: { publishedAt: 'desc' },
         skip: (page - 1) * SITEMAP_PAGE,
         take: SITEMAP_PAGE,
@@ -111,6 +100,9 @@ const contentRoutes: FastifyPluginAsync = async app => {
       prisma.post.count({ where: publishedWhere() }),
     ]);
     reply.header('cache-control', 'public, max-age=300');
+    // Idiomas traduzidos de cada artigo (hreflang no sitemap).
+    const locales = await localesForPosts(rawItems.map(i => i.id));
+    const items = rawItems.map(({ id, ...rest }) => ({ ...rest, locales: locales.get(id) || [] }));
     return { items, total, page, pages: Math.max(1, Math.ceil(total / SITEMAP_PAGE)), pageSize: SITEMAP_PAGE };
   });
   app.get('/sitemap/news', async (_req, reply) => {
@@ -167,11 +159,12 @@ const contentRoutes: FastifyPluginAsync = async app => {
         tag: z.string().max(80).optional(),
         q: z.string().trim().max(100).optional(),
         sort: z.enum(['recent', 'popular']).default('recent'),
+        locale: z.string().max(10).optional(),
       })
       .parse(req.query);
     const cacheKey = `posts:${q.page}:${q.limit}:${q.category || ''}:${q.tag || ''}:${q.q || ''}:${q.sort}`;
     const cached = await getCache<any>(cacheKey);
-    if (cached) return cached;
+    if (cached) return { ...cached, items: await localizePostList(cached.items, q.locale) };
     const now = new Date();
     const where: any = {
       AND: [
@@ -207,10 +200,11 @@ const contentRoutes: FastifyPluginAsync = async app => {
     ]);
     const result = { items, total, page: q.page, pages: Math.ceil(total / q.limit) };
     await setCache(cacheKey, result, 60);
-    return result;
+    return { ...result, items: await localizePostList(items, q.locale) };
   });
   app.get('/posts/:slug', async (req, reply) => {
     const { slug } = z.object({ slug: z.string() }).parse(req.params);
+    const { locale } = z.object({ locale: z.string().max(10).optional() }).parse(req.query ?? {});
     const post = await prisma.post.findUnique({
       where: { slug },
       include: {
@@ -245,7 +239,7 @@ const contentRoutes: FastifyPluginAsync = async app => {
     const premiumLocked = post.isPremium && !privileged;
     // Visualizações são contadas por POST /posts/:id/view (disparado pelo navegador/app),
     // não pela renderização no servidor, que é cacheada e não representa leitores reais.
-    return { ...post, content: premiumLocked ? '' : post.content, premiumLocked };
+    return localizePost({ ...post, content: premiumLocked ? '' : post.content, premiumLocked }, locale);
   });
   app.post('/posts/:id/view', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async req => {
     const { id } = z.object({ id: z.string().min(1).max(40) }).parse(req.params);
@@ -436,42 +430,6 @@ const contentRoutes: FastifyPluginAsync = async app => {
     scheduledAt: z.string().datetime().optional().nullable(),
   });
 
-  const sanitizePostHtml = (content: string) =>
-    sanitizeHtml(content, {
-      allowedTags: sanitizeHtml.defaults.allowedTags.concat([
-        'img',
-        'h1',
-        'h2',
-        'h3',
-        'figure',
-        'figcaption',
-        'iframe',
-        'span',
-      ]),
-      // Única classe permitida: marcação de spoiler do editor.
-      allowedClasses: { span: ['spoiler'] },
-      allowedAttributes: {
-        ...sanitizeHtml.defaults.allowedAttributes,
-        a: ['href', 'target', 'rel'],
-        img: ['src', 'alt', 'title', 'loading', 'width', 'height'],
-        iframe: ['src', 'title', 'allow', 'allowfullscreen', 'frameborder', 'loading', 'referrerpolicy'],
-      },
-      allowedSchemes: ['http', 'https', 'mailto'],
-      allowedSchemesByTag: { img: ['http', 'https'], iframe: ['https'] },
-      allowedIframeHostnames: ALLOWED_IFRAME_HOSTS,
-      allowProtocolRelative: false,
-      transformTags: {
-        // Links externos nunca recebem acesso a window.opener.
-        a: (tagName, attribs) => ({
-          tagName,
-          attribs: { ...attribs, ...(attribs.target === '_blank' ? { rel: 'noopener noreferrer nofollow' } : {}) },
-        }),
-        iframe: (tagName, attribs) => ({
-          tagName,
-          attribs: { ...attribs, loading: 'lazy', referrerpolicy: 'strict-origin-when-cross-origin' },
-        }),
-      },
-    });
 
   async function uniquePostSlug(raw: string, currentPostId?: string) {
     const base = slugify(raw).slice(0, 120) || `artigo-${Date.now()}`;

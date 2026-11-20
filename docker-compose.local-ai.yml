@@ -6,6 +6,7 @@
 #    Ollama e salva rascunhos + imagens direto no banco;
 #  - discovery-worker: gera os embeddings das recomendações "parecidos com...";
 #  - shop-worker: confere preço/estoque/links da Shop a cada N horas;
+#  - translation-worker: traduz artigos e produtos para inglês e espanhol;
 #  - moderation-worker + moderator: verifica imagens enviadas por usuários (NudeNet);
 #  - mysql-backup: cópia diária do banco da Hostinger em ./backups;
 #  - ollama: as LLMs (também usadas pelo CMS para escrever os textos da Shop).
@@ -126,6 +127,22 @@ services:
       SHOP_WORKER_HEALTH_PORT: 4040
     ports:
       - "127.0.0.1:4040:4040"
+
+  # Traduz artigos publicados e produtos da Shop para inglês e espanhol (Ollama).
+  translation-worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ["node", "dist/translation-worker.js"]
+    restart: unless-stopped
+    environment:
+      <<: *worker-env
+      TRANSLATION_WORKER_HEALTH_PORT: 4060
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4060:4060"
 
   moderator:
     build:

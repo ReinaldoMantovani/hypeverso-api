@@ -103,11 +103,28 @@ export const moderationSchema = z.object({
   hideUntilApproved: z.boolean().default(false),
 });
 
+export const TRANSLATION_LOCALES = ['en', 'es'] as const;
+export type TranslationLocale = (typeof TRANSLATION_LOCALES)[number];
+
+export const translationSchema = z.object({
+  /** Traduz artigos publicados automaticamente (worker de IA no seu PC). */
+  enabled: z.boolean().default(true),
+  /** Idiomas gerados (o original é sempre pt-BR). */
+  locales: z.array(z.enum(TRANSLATION_LOCALES)).max(2).catch(['en', 'es']).default(['en', 'es']),
+  /** Também traduz nome, descrição e destaques dos produtos da Shop. */
+  translateShop: z.boolean().default(true),
+  /** Modelo do Ollama para traduzir (vazio = o mesmo do IA Notícias). */
+  model: text(80, ''),
+  /** Só mostra no site depois que alguém revisar no CMS. */
+  requireReview: z.boolean().default(false),
+});
+
 export const settingSchemas = {
   affiliate: affiliateSchema,
   shop: shopTextSchema,
   ai: aiSchema,
   moderation: moderationSchema,
+  translation: translationSchema,
 } as const;
 export type SettingKey = keyof typeof settingSchemas;
 export type AllSettings = { [K in SettingKey]: z.infer<(typeof settingSchemas)[K]> };
@@ -147,5 +164,6 @@ export async function getPublicSettings() {
   return {
     shop: shopPublic,
     affiliate: { amazonTag: all.affiliate.amazonTag, extraStores: all.affiliate.extraStores },
+    translation: { enabled: all.translation.enabled, locales: all.translation.locales },
   };
 }

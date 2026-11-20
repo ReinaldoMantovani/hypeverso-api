@@ -1135,14 +1135,17 @@ async function updateStage(jobId: string, stage: string, stageMessage: string, p
   const normalizedProgress = progress === undefined ? undefined : Math.max(0, Math.min(99, Math.round(progress)));
   const updated = await prisma.aiNewsJob.updateMany({
     where: { id: jobId, status: 'PROCESSING', cancelRequestedAt: null, hiddenAt: null },
-    data: {
-      stage,
-      stageMessage,
-      lastHeartbeatAt: new Date(),
-      ...(normalizedProgress === undefined ? {} : { progress: normalizedProgress }),
-    },
+    data: { stage, stageMessage, lastHeartbeatAt: new Date() },
   });
   if (!updated.count) throw new AiNewsJobCanceledError();
+  // A barra só anda para a frente: quando a IA refaz uma etapa (ex.: JSON fora do
+  // formato), a nova tentativa não deve fazer o progresso "voltar" na tela.
+  if (normalizedProgress !== undefined) {
+    await prisma.aiNewsJob.updateMany({
+      where: { id: jobId, status: 'PROCESSING', progress: { lt: normalizedProgress } },
+      data: { progress: normalizedProgress },
+    });
+  }
 }
 
 function draftProgress(job: any, draftIndex: number, localPercent: number) {

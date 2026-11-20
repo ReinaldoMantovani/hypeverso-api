@@ -1,33 +1,14 @@
-# Atualizações automáticas de dependências (agrupadas para reduzir ruído).
+# Atualizações de dependências: só npm, 1x por mês, no máximo 3 PRs abertos.
+# Atualizações "major" (que podem quebrar o código) ficam de fora: faça manualmente.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
-    schedule: { interval: weekly, day: monday, time: '06:00', timezone: America/Sao_Paulo }
-    open-pull-requests-limit: 10
+    schedule: { interval: monthly, time: '06:00', timezone: America/Sao_Paulo }
+    open-pull-requests-limit: 3
     groups:
-      minor-and-patch:
+      dependencias:
         update-types: [minor, patch]
-      next-react:
-        patterns: ['next', 'react', 'react-dom', '@types/react*']
-      prisma:
-        patterns: ['prisma', '@prisma/*']
     ignore:
-      # O app mobile segue as versões do Expo SDK: atualize com `npx expo install --fix`.
-      - dependency-name: 'expo*'
-      - dependency-name: 'react-native*'
-  - package-ecosystem: docker
-    directory: /docker
-    schedule: { interval: weekly }
-  - package-ecosystem: docker-compose
-    directory: /
-    schedule: { interval: weekly }
-  - package-ecosystem: pip
-    directory: /services/extractor
-    schedule: { interval: weekly }
-  - package-ecosystem: pip
-    directory: /services/moderator
-    schedule: { interval: weekly }
-  - package-ecosystem: github-actions
-    directory: /
-    schedule: { interval: monthly }
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']

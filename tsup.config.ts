@@ -9,6 +9,7 @@ export default defineConfig({
     'src/discovery-worker.ts',
     'src/queue-worker.ts',
     'src/shop-worker.ts',
+    'src/translation-worker.ts',
     'src/moderation-worker.ts',
   ],
   format: ['esm'],

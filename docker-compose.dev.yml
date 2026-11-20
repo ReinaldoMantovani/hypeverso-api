@@ -7,7 +7,7 @@
 # API: http://localhost:4000 · MySQL: 127.0.0.1:3307 (usuário/senha hypeverso)
 # =============================================================================
 x-dev-db: &dev-db
-  DATABASE_URL: mysql://hypeverso:Hypeverso05@mysql:3306/hypeverso?connection_limit=5
+  DATABASE_URL: mysql://hypeverso:hypeverso@mysql:3306/hypeverso?connection_limit=5
   PUBLIC_WEB_URL: http://localhost:3000
 
 services:
@@ -17,7 +17,7 @@ services:
     environment:
       MYSQL_DATABASE: hypeverso
       MYSQL_USER: hypeverso
-      MYSQL_PASSWORD: Hypeverso05
+      MYSQL_PASSWORD: hypeverso
       MYSQL_ROOT_PASSWORD: hypeverso-root
     command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--max_allowed_packet=64M"]
     volumes:
@@ -25,7 +25,7 @@ services:
     ports:
       - "127.0.0.1:3307:3306"
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uhypeverso -pHypeverso05 --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uhypeverso -phypeverso --silent"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -91,7 +91,7 @@ services:
 
   mysql-backup:
     environment:
-      DATABASE_URL: mysql://hypeverso:Hypeverso05@mysql:3306/hypeverso
+      DATABASE_URL: mysql://hypeverso:hypeverso@mysql:3306/hypeverso
     depends_on:
       mysql:
         condition: service_healthy

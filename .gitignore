@@ -3,11 +3,12 @@ dist
 coverage
 .env
 .env.*
-.env.example
-.env.worker.example
+!.env.example
+!.env.worker.example
 *.log
 .DS_Store
 uploads/*
 !uploads/.gitkeep
 backups/
 logs/
+!.env.local-dev.example

@@ -31,6 +31,7 @@ import communityModerationRoutes from './routes/community-moderation.js';
 import revenueRoutes from './routes/revenue.js';
 import shopRoutes from './routes/shop.js';
 import settingsRoutes from './routes/settings.js';
+import translationsRoutes from './routes/translations.js';
 import mediaRoutes from './routes/media.js';
 import { Redis } from 'ioredis';
 import { redisOptions } from './lib/redis.js';
@@ -232,6 +233,7 @@ export async function buildApp() {
   await app.register(analyticsRoutes, { prefix: '/api' });
   await app.register(shopRoutes, { prefix: '/api' });
   await app.register(settingsRoutes, { prefix: '/api' });
+  await app.register(translationsRoutes, { prefix: '/api' });
   await app.register(mediaRoutes, { prefix: '/api' });
   return app;
 }

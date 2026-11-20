@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { localizeShopList } from '../services/translation.js';
 import { nanoid } from 'nanoid';
 import { prisma, Prisma } from '../db.js';
 import { requireRole, optionalUser } from '../lib/auth.js';
@@ -192,6 +193,7 @@ const shopRoutes: FastifyPluginAsync = async app => {
         q: z.string().trim().max(80).optional(),
         /** Lista de IDs ou slugs (produtos dentro de artigos): devolve nessa ordem. */
         ids: z.string().trim().max(1000).optional(),
+        locale: z.string().max(10).optional(),
       })
       .parse(req.query ?? {});
     reply.header('cache-control', 'public, max-age=30, stale-while-revalidate=120');
@@ -203,7 +205,7 @@ const shopRoutes: FastifyPluginAsync = async app => {
       const items = wanted
         .map(key => all.find(p => p.id === key || p.slug === key))
         .filter((p): p is PublicProduct => Boolean(p));
-      return { items, categories: [], stores: [], collections: [], total: items.length };
+      return { items: await localizeShopList(items, q.locale), categories: [], stores: [], collections: [], total: items.length };
     }
     const term = q.q?.toLowerCase();
     const items = all.filter(
@@ -216,7 +218,7 @@ const shopRoutes: FastifyPluginAsync = async app => {
       [...new Set(values.filter((v): v is string => Boolean(v)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
     const collections = await publicCollections();
     return {
-      items,
+      items: await localizeShopList(items, q.locale),
       categories: uniq(all.map(p => p.category)),
       stores: uniq(all.map(p => p.store)),
       collections: collections.filter(c => c.showOnShop).map(({ slug, title, emoji }) => ({ slug, title, emoji })),
@@ -226,11 +228,12 @@ const shopRoutes: FastifyPluginAsync = async app => {
 
   app.get('/shop/collections/:slug', async (req, reply) => {
     const { slug } = z.object({ slug: z.string().trim().min(1).max(120) }).parse(req.params);
+    const { locale } = z.object({ locale: z.string().max(10).optional() }).parse(req.query ?? {});
     const collection = (await publicCollections()).find(c => c.slug === slug);
     if (!collection) return reply.code(404).send({ error: 'Coleção não encontrada' });
     reply.header('cache-control', 'public, max-age=30, stale-while-revalidate=120');
     const all = await activeProducts();
-    return { collection: publicCollection(collection), items: collectionItems(collection, all) };
+    return { collection: publicCollection(collection), items: await localizeShopList(collectionItems(collection, all), locale) };
   });
 
   /**

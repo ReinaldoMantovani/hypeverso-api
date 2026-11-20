@@ -24,6 +24,7 @@
     "db:sync": "node scripts/db-sync.mjs",
     "backup": "docker compose -f docker-compose.local-ai.yml --env-file .env.worker run --rm -e ONCE=1 mysql-backup",
     "worker:shop": "tsx src/shop-worker.ts",
+    "worker:translation": "tsx src/translation-worker.ts",
     "worker:moderation": "tsx src/moderation-worker.ts",
     "postinstall": "prisma generate",
     "admin:sql": "tsx scripts/admin-sql.ts"

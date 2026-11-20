@@ -38,6 +38,7 @@ const workers = [
   { name: 'ia-noticias', script: 'src/ai-worker.ts' },
   { name: 'recomendacoes', script: 'src/discovery-worker.ts' },
   { name: 'shop', script: 'src/shop-worker.ts' },
+  { name: 'traducao', script: 'src/translation-worker.ts' },
 ];
 // Moderação de imagens precisa do serviço Python NudeNet (Docker). Ative com MODERATION=on.
 if ((env.MODERATION || '').toLowerCase() === 'on') {
