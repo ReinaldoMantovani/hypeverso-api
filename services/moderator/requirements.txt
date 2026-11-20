@@ -6,6 +6,6 @@ Pillow==11.3.0
 # evitar incompatibilidades de ABI que podem acontecer quando pip resolve NumPy
 # e ONNX Runtime livremente em imagens slim.
 nudenet==3.4.2
-numpy==1.26.4
+numpy==2.5.5
 onnxruntime==1.20.1
 opencv-python-headless==4.10.0.84
