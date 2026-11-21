@@ -5,7 +5,8 @@ import { slugify } from '../lib/security.js';
 
 export const mediaTypes = ['MOVIE', 'SERIES', 'GAME', 'ANIME', 'MANGA', 'COMIC'] as const;
 export type MediaType = (typeof mediaTypes)[number];
-export type CatalogProvider = 'TMDB' | 'IGDB' | 'ANILIST';
+export const CATALOG_PROVIDERS = ['TMDB', 'IGDB', 'ANILIST', 'METRON', 'GOOGLE_BOOKS'] as const;
+export type CatalogProvider = (typeof CATALOG_PROVIDERS)[number];
 
 export type CatalogItem = {
   provider: CatalogProvider;
@@ -285,11 +286,172 @@ async function detailIgdb(id: string): Promise<CatalogItem | null> {
   return rows[0] ? normalizeIgdb(rows[0]) : null;
 }
 
+// ---------------------------------------------------------------- HQs
+
+/**
+ * Metron (metron.cloud): banco comunitário de quadrinhos (principalmente EUA).
+ * Autenticação Basic com usuário/senha da conta grátis. Limite baixo de
+ * requisições: por isso os resultados ficam em cache.
+ * Cada resultado é a edição nº 1 de uma série (é ela que traz a capa).
+ */
+const metronToken = () => (env.METRON_API_TOKEN || '').trim();
+const metronConfigured = () => Boolean(metronToken() || (env.METRON_USERNAME && env.METRON_PASSWORD));
+// O Metron é feito em Django REST Framework: token vai como "Token <chave>".
+// Se o servidor recusar, tentamos "Bearer" e guardamos o formato que funcionou.
+let metronScheme: 'Token' | 'Bearer' = 'Token';
+function metronHeaders(scheme = metronScheme) {
+  const base = { Accept: 'application/json', 'User-Agent': 'Hypeverso/3.0 (+https://hypeverso.com)' };
+  if (metronToken()) return { ...base, Authorization: `${scheme} ${metronToken()}` };
+  const basic = Buffer.from(`${env.METRON_USERNAME}:${env.METRON_PASSWORD}`).toString('base64');
+  return { ...base, Authorization: `Basic ${basic}` };
+}
+async function metronRequest<T>(url: string): Promise<T> {
+  try {
+    return await requestJson<T>(url, { headers: metronHeaders() }, 15000);
+  } catch (error) {
+    if (!metronToken() || !/HTTP 40[13]/.test(String(error))) throw error;
+    const other = metronScheme === 'Token' ? 'Bearer' : 'Token';
+    const result = await requestJson<T>(url, { headers: metronHeaders(other) }, 15000);
+    metronScheme = other;
+    return result;
+  }
+}
+export const metronAuthMode = () => (metronToken() ? `token (${metronScheme})` : 'usuário e senha');
+function normalizeMetronIssue(row: any, detail = false): CatalogItem {
+  const series = row.series || {};
+  const year = series.year_began || (row.cover_date ? String(row.cover_date).slice(0, 4) : null);
+  const seriesName = series.name || row.issue || `HQ ${row.id}`;
+  return {
+    provider: 'METRON',
+    externalId: String(row.id),
+    mediaType: 'COMIC',
+    title: year ? `${seriesName} (${year})` : seriesName,
+    originalTitle: seriesName,
+    description: compact(row.desc || series.desc) || null,
+    coverUrl: row.image || null,
+    backdropUrl: null,
+    releaseDate: row.cover_date || row.store_date || null,
+    genres: (series.genres || row.genres || []).map((g: any) => g?.name || g).filter(Boolean),
+    rating: null,
+    sourceUrl: row.resource_url || `https://metron.cloud/issue/${row.id}/`,
+    trailerUrl: null,
+    metadata: {
+      source: 'Metron',
+      issue: row.number ?? null,
+      volume: series.volume ?? null,
+      publisher: row.publisher?.name || series.publisher?.name || null,
+      ...(detail
+        ? {
+            creators: (row.credits || [])
+              .slice(0, 12)
+              .map((c: any) => ({ name: c.creator, roles: (c.role || []).map((r: any) => r.name) })),
+            characters: (row.characters || []).slice(0, 20).map((c: any) => c.name),
+          }
+        : {}),
+    },
+  };
+}
+async function searchMetron(query: string): Promise<CatalogItem[]> {
+  if (!metronConfigured()) return [];
+  const url = new URL('https://metron.cloud/api/issue/');
+  url.searchParams.set('series_name', query);
+  url.searchParams.set('number', '1');
+  const data = await metronRequest<any>(url.toString());
+  return (data.results || []).slice(0, 10).map((r: any) => normalizeMetronIssue(r));
+}
+async function detailMetron(id: string): Promise<CatalogItem | null> {
+  if (!metronConfigured() || !/^\d{1,12}$/.test(id)) return null;
+  const row = await metronRequest<any>(`https://metron.cloud/api/issue/${id}/`);
+  return row?.id ? normalizeMetronIssue(row, true) : null;
+}
+
+/**
+ * Google Books: encadernados, graphic novels e edições brasileiras (Panini,
+ * Mythos, Pipoca & Nanquim...). Funciona sem chave (limite baixo); com
+ * GOOGLE_BOOKS_API_KEY o limite diário é bem maior.
+ */
+function googleBooksCover(info: any) {
+  const raw: string | undefined =
+    info?.imageLinks?.extraLarge || info?.imageLinks?.large || info?.imageLinks?.medium || info?.imageLinks?.thumbnail;
+  if (!raw) return null;
+  return raw.replace(/^http:/, 'https:').replace(/&edge=curl/, '');
+}
+function googleBooksDate(v?: string) {
+  if (!v || !/^\d{4}/.test(v)) return null;
+  const [y, m = '01', d = '01'] = v.split('-');
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+function normalizeGoogleBook(row: any): CatalogItem {
+  const v = row.volumeInfo || {};
+  const isbn = (v.industryIdentifiers || []).find((i: any) => /ISBN_13|ISBN_10/.test(i.type))?.identifier || null;
+  return {
+    provider: 'GOOGLE_BOOKS',
+    externalId: String(row.id),
+    mediaType: 'COMIC',
+    title: [v.title, v.subtitle].filter(Boolean).join(': ') || `HQ ${row.id}`,
+    originalTitle: v.title || null,
+    description: compact(v.description) || null,
+    coverUrl: googleBooksCover(v),
+    backdropUrl: null,
+    releaseDate: googleBooksDate(v.publishedDate),
+    genres: (v.categories || [])
+      .flatMap((c: string) => c.split('/').map(x => x.trim()))
+      .filter(Boolean)
+      .slice(0, 6),
+    rating: typeof v.averageRating === 'number' ? v.averageRating * 2 : null,
+    sourceUrl: v.infoLink || v.canonicalVolumeLink || null,
+    trailerUrl: null,
+    metadata: {
+      source: 'Google Books',
+      authors: v.authors || [],
+      publisher: v.publisher || null,
+      pages: v.pageCount || null,
+      language: v.language || null,
+      isbn,
+    },
+  };
+}
+const COMIC_HINT = /(comic|graphic|quadrinho|hq|mang[aá]|historieta|bande dessin)/i;
+async function searchGoogleBooks(query: string): Promise<CatalogItem[]> {
+  const run = async (q: string, lang?: string) => {
+    const url = new URL('https://www.googleapis.com/books/v1/volumes');
+    url.searchParams.set('q', q);
+    url.searchParams.set('printType', 'books');
+    url.searchParams.set('maxResults', '20');
+    if (lang) url.searchParams.set('langRestrict', lang);
+    if (env.GOOGLE_BOOKS_API_KEY) url.searchParams.set('key', env.GOOGLE_BOOKS_API_KEY);
+    const data = await requestJson<any>(url.toString(), { headers: { Accept: 'application/json' } }, 15000);
+    return (data.items || []) as any[];
+  };
+  // 1) Quadrinhos em português; 2) se vier pouco, quadrinhos em qualquer idioma.
+  let rows = await run(`${query} subject:comics`, 'pt');
+  if (rows.length < 4) rows = [...rows, ...(await run(`${query} subject:comics`))];
+  const seen = new Set<string>();
+  return rows
+    .filter(r => {
+      if (!r?.id || seen.has(r.id)) return false;
+      seen.add(r.id);
+      const cats = (r.volumeInfo?.categories || []).join(' ');
+      return !cats || COMIC_HINT.test(cats);
+    })
+    .slice(0, 10)
+    .map(normalizeGoogleBook);
+}
+async function detailGoogleBook(id: string): Promise<CatalogItem | null> {
+  if (!/^[\w-]{4,40}$/.test(id)) return null;
+  const url = new URL(`https://www.googleapis.com/books/v1/volumes/${encodeURIComponent(id)}`);
+  if (env.GOOGLE_BOOKS_API_KEY) url.searchParams.set('key', env.GOOGLE_BOOKS_API_KEY);
+  const row = await requestJson<any>(url.toString(), { headers: { Accept: 'application/json' } }, 15000);
+  return row?.id ? normalizeGoogleBook(row) : null;
+}
+
 export function providerAvailability() {
   return {
     TMDB: Boolean(env.TMDB_READ_TOKEN),
     ANILIST: true,
     IGDB: Boolean(env.IGDB_CLIENT_ID && env.IGDB_CLIENT_SECRET),
+    METRON: metronConfigured(),
+    GOOGLE_BOOKS: true,
   };
 }
 
@@ -313,6 +475,13 @@ export async function diagnoseProviders() {
       env.IGDB_CLIENT_ID && env.IGDB_CLIENT_SECRET
         ? await run(() => searchIgdb('Zelda'))
         : { ok: false, error: 'IGDB_CLIENT_ID / IGDB_CLIENT_SECRET não configurados (jogos)' },
+    METRON: metronConfigured()
+      ? { ...(await run(() => searchMetron('Batman'))), credential: metronAuthMode() }
+      : { ok: false, error: 'METRON_API_TOKEN (ou METRON_USERNAME/METRON_PASSWORD) não configurado (HQs americanas)' },
+    GOOGLE_BOOKS: {
+      ...(await run(() => searchGoogleBooks('Turma da Mônica'))),
+      credential: env.GOOGLE_BOOKS_API_KEY ? 'com chave' : 'sem chave (limite baixo)',
+    },
   };
 }
 
@@ -350,7 +519,9 @@ export async function searchCatalog(query: string, type?: MediaType) {
   if (!type || type === 'ANIME') tasks.push(searchAniList(normalized, 'ANIME'));
   if (!type || type === 'MANGA') tasks.push(searchAniList(normalized, 'MANGA'));
   if ((!type || type === 'GAME') && env.IGDB_CLIENT_ID && env.IGDB_CLIENT_SECRET) tasks.push(searchIgdb(normalized));
-  // HQ/COMIC fica manual nesta primeira fase até adicionarmos um provider dedicado.
+  // HQs: Metron (séries/edições, EUA) + Google Books (encadernados e edições brasileiras).
+  if ((!type || type === 'COMIC') && metronConfigured()) tasks.push(searchMetron(normalized));
+  if (!type || type === 'COMIC') tasks.push(searchGoogleBooks(normalized));
   const settled = await Promise.allSettled(tasks);
   const failures = settled.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
   for (const f of failures) console.warn('[catalogo] busca externa falhou:', f.reason instanceof Error ? f.reason.message : f.reason);
@@ -405,6 +576,8 @@ export async function getCatalogDetails(
   else if (provider === 'ANILIST' && (type === 'ANIME' || type === 'MANGA'))
     item = await detailAniList(externalId, type);
   else if (provider === 'IGDB' && type === 'GAME') item = await detailIgdb(externalId);
+  else if (provider === 'METRON' && type === 'COMIC') item = await detailMetron(externalId);
+  else if (provider === 'GOOGLE_BOOKS' && type === 'COMIC') item = await detailGoogleBook(externalId);
   if (item) await setCache(cacheKey, item, env.MEDIA_CATALOG_CACHE_HOURS * 3600);
   return item;
 }

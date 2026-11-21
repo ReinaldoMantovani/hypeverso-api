@@ -49,6 +49,11 @@ const schema = z.object({
   TMDB_READ_TOKEN: z.string().optional(),
   IGDB_CLIENT_ID: z.string().optional(),
   IGDB_CLIENT_SECRET: z.string().optional(),
+  // HQs: Metron (conta grátis em metron.cloud) e Google Books (edições brasileiras).
+  METRON_API_TOKEN: z.string().optional(),
+  METRON_USERNAME: z.string().optional(),
+  METRON_PASSWORD: z.string().optional(),
+  GOOGLE_BOOKS_API_KEY: z.string().optional(),
   MEDIA_CATALOG_CACHE_HOURS: z.coerce.number().int().min(1).max(168).default(24),
 
   // Search 2.0 / Discovery
@@ -184,7 +189,7 @@ if (env.NODE_ENV === 'production') {
   }
   if (!env.MFA_ENCRYPTION_KEY) problems.push('MFA_ENCRYPTION_KEY é obrigatória em produção (32+ caracteres)');
   if (problems.length) {
-    // eslint-disable-next-line no-console
+     
     console.error(`[config] Configuração insegura para produção:\n - ${problems.join('\n - ')}`);
     process.exit(1);
   }
