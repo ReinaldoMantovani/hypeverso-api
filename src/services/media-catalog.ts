@@ -49,8 +49,26 @@ async function requestJson<T>(url: string, init: RequestInit = {}, timeoutMs = 1
   }
 }
 
-function tmdbHeaders() {
-  return env.TMDB_READ_TOKEN ? { Authorization: `Bearer ${env.TMDB_READ_TOKEN}`, Accept: 'application/json' } : null;
+/**
+ * O TMDB tem 2 tipos de credencial e as duas funcionam aqui:
+ * - "Token de leitura da API" (v4, começa com "eyJ...", longo) → cabeçalho Bearer;
+ * - "Chave da API" (v3, 32 letras/números) → parâmetro api_key na URL.
+ * Antes só o Bearer era aceito, e a chave v3 fazia toda busca voltar vazia (401).
+ */
+const tmdbCredential = () => (env.TMDB_READ_TOKEN || '').trim();
+const tmdbIsV3Key = () => /^[a-f0-9]{32}$/i.test(tmdbCredential());
+
+function tmdbHeaders(): Record<string, string> | null {
+  const cred = tmdbCredential();
+  if (!cred) return null;
+  return tmdbIsV3Key() ? { Accept: 'application/json' } : { Authorization: `Bearer ${cred}`, Accept: 'application/json' };
+}
+
+/** Acrescenta api_key quando a credencial é a chave v3. */
+function tmdbUrl(url: URL | string) {
+  const u = new URL(url.toString());
+  if (tmdbIsV3Key()) u.searchParams.set('api_key', tmdbCredential());
+  return u.toString();
 }
 
 async function searchTmdb(query: string, type: 'MOVIE' | 'SERIES'): Promise<CatalogItem[]> {
@@ -62,7 +80,7 @@ async function searchTmdb(query: string, type: 'MOVIE' | 'SERIES'): Promise<Cata
   url.searchParams.set('include_adult', 'false');
   url.searchParams.set('language', 'pt-BR');
   url.searchParams.set('page', '1');
-  const data = await requestJson<any>(url.toString(), { headers });
+  const data = await requestJson<any>(tmdbUrl(url), { headers });
   return (data.results || []).slice(0, 8).map((row: any) => ({
     provider: 'TMDB' as const,
     externalId: String(row.id),
@@ -87,7 +105,7 @@ async function detailTmdb(id: string, type: 'MOVIE' | 'SERIES'): Promise<Catalog
   const url = new URL(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(id)}`);
   url.searchParams.set('language', 'pt-BR');
   url.searchParams.set('append_to_response', 'videos,credits');
-  const row = await requestJson<any>(url.toString(), { headers });
+  const row = await requestJson<any>(tmdbUrl(url), { headers });
   const trailer =
     (row.videos?.results || []).find((v: any) => v.site === 'YouTube' && v.type === 'Trailer') ||
     (row.videos?.results || []).find((v: any) => v.site === 'YouTube');
@@ -275,6 +293,29 @@ export function providerAvailability() {
   };
 }
 
+/** Testa cada fonte do catálogo (usado em /catalog/diagnostics, só para a equipe). */
+export async function diagnoseProviders() {
+  const run = async (fn: () => Promise<CatalogItem[]>) => {
+    const t = Date.now();
+    try {
+      const items = await fn();
+      return { ok: items.length > 0, results: items.length, ms: Date.now() - t, error: items.length ? null : 'Sem resultados' };
+    } catch (e) {
+      return { ok: false, results: 0, ms: Date.now() - t, error: e instanceof Error ? e.message : String(e) };
+    }
+  };
+  return {
+    TMDB: env.TMDB_READ_TOKEN
+      ? { ...(await run(() => searchTmdb('Batman', 'MOVIE'))), credential: tmdbIsV3Key() ? 'chave v3 (api_key)' : 'token v4 (Bearer)' }
+      : { ok: false, error: 'TMDB_READ_TOKEN não configurado' },
+    ANILIST: await run(() => searchAniList('Naruto', 'ANIME')),
+    IGDB:
+      env.IGDB_CLIENT_ID && env.IGDB_CLIENT_SECRET
+        ? await run(() => searchIgdb('Zelda'))
+        : { ok: false, error: 'IGDB_CLIENT_ID / IGDB_CLIENT_SECRET não configurados (jogos)' },
+  };
+}
+
 export async function searchCatalog(query: string, type?: MediaType) {
   const normalized = query.trim();
   const cacheKey = `catalog:search:${type || 'ALL'}:${normalized.toLowerCase()}`;
@@ -311,6 +352,8 @@ export async function searchCatalog(query: string, type?: MediaType) {
   if ((!type || type === 'GAME') && env.IGDB_CLIENT_ID && env.IGDB_CLIENT_SECRET) tasks.push(searchIgdb(normalized));
   // HQ/COMIC fica manual nesta primeira fase até adicionarmos um provider dedicado.
   const settled = await Promise.allSettled(tasks);
+  const failures = settled.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+  for (const f of failures) console.warn('[catalogo] busca externa falhou:', f.reason instanceof Error ? f.reason.message : f.reason);
   const external = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : [])).filter(i => i.title);
   const seen = new Set<string>();
   const items = [...localItems, ...external]
@@ -321,7 +364,8 @@ export async function searchCatalog(query: string, type?: MediaType) {
       return true;
     })
     .slice(0, 24);
-  await setCache(cacheKey, items, 600);
+  // Não guarda "nada encontrado" quando foi falha de rede/credencial (tenta de novo na próxima busca).
+  if (items.length || !failures.length) await setCache(cacheKey, items, items.length ? 600 : 120);
   return items;
 }
 
@@ -446,7 +490,7 @@ async function releasesTmdb(from: string, to: string, type: 'MOVIE' | 'SERIES'):
   url.searchParams.set('sort_by', type === 'MOVIE' ? 'primary_release_date.asc' : 'first_air_date.asc');
   url.searchParams.set(type === 'MOVIE' ? 'primary_release_date.gte' : 'first_air_date.gte', from);
   url.searchParams.set(type === 'MOVIE' ? 'primary_release_date.lte' : 'first_air_date.lte', to);
-  const data = await requestJson<any>(url.toString(), { headers }, 18000);
+  const data = await requestJson<any>(tmdbUrl(url), { headers }, 18000);
   return (data.results || [])
     .slice(0, 30)
     .map((row: any) => ({
@@ -570,7 +614,7 @@ export async function getWatchProviders(
   const endpoint = type === 'MOVIE' ? 'movie' : 'tv';
   try {
     const data = await requestJson<any>(
-      `https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(externalId)}/watch/providers`,
+      tmdbUrl(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(externalId)}/watch/providers`),
       { headers },
     );
     const r = data?.results?.[region] || {};

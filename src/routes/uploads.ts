@@ -65,6 +65,13 @@ async function detectImageFormat(file: string): Promise<string | null> {
 
 const uploadRoutes: FastifyPluginAsync = async app => {
   app.get('/uploads/moderation-health', { preHandler: authenticate }, async (_req, reply) => {
+    // Moderação desligada (padrão na Hostinger) não é erro: responde 200 para o
+    // site não ficar registrando 503 no console a cada 10 s.
+    const modSettings = (await getAllSettings()).moderation;
+    if (!env.IMAGE_MODERATION_ENABLED && !modSettings.enabled)
+      return reply.send({ ok: true, enabled: false, mode: 'off', message: 'Moderação automática desligada' });
+    if (!env.IMAGE_MODERATION_ENABLED)
+      return reply.send({ ok: true, enabled: true, mode: 'deferred', message: 'Imagens são analisadas pelo moderador do PC da equipe' });
     const health = await checkImageModerationHealth();
     return reply.code(health.ok ? 200 : 503).send(health);
   });

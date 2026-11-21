@@ -1,13 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
-import { authenticate } from '../lib/auth.js';
+import { authenticate, requireRole } from '../lib/auth.js';
 import {
   cacheCatalogItem,
   getCatalogDetails,
   getCatalogReleases,
   mediaTypes,
   providerAvailability,
+  diagnoseProviders,
   searchCatalog,
 } from '../services/media-catalog.js';
 
@@ -16,6 +17,8 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no f
 
 const catalogRoutes: FastifyPluginAsync = async app => {
   app.get('/catalog/providers', async () => ({ providers: providerAvailability() }));
+  // Diagnóstico: testa TMDB, AniList e IGDB de verdade (abra logado como admin).
+  app.get('/catalog/diagnostics', { preHandler: requireRole('ADMIN', 'EDITOR') }, async () => diagnoseProviders());
 
   app.get('/catalog/search', { config: { rateLimit: { max: 40, timeWindow: '1 minute' } } }, async req => {
     const { q, type } = z
