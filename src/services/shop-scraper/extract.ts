@@ -1,3 +1,4 @@
+// CÓPIA de hypeverso-cms/lib/server/extract.ts (mantenha as duas iguais).
 import * as cheerio from 'cheerio';
 import { detectStore, type StoreKey } from './affiliate.js';
 
@@ -261,13 +262,22 @@ export function extractProductData(html: string, finalUrl: string): ProductData 
   });
 
   // ---------------- textos
-  const title =
+  // Remove o nome da loja que algumas páginas colocam no título ("… | Shopee Brasil").
+  const stripStore = (t: string | null) =>
+    t
+      ? t
+          .replace(/\s*[|\-–:]\s*(shopee( brasil)?|mercado ?livre|amazon(\.com)?(\.br)?|magalu|magazine luiza|kabum!?|aliexpress)\s*$/i, '')
+          .replace(/^amazon\.com\.br\s*:\s*/i, '')
+          .trim() || null
+      : null;
+  const title = stripStore(
     clean($('#productTitle').text(), 220) ||
     clean($('h1.ui-pdp-title').text(), 220) ||
     clean(product?.name, 220) ||
     clean(meta('og:title', 'twitter:title'), 220) ||
     clean($('h1').first().text(), 220) ||
-    clean($('title').text(), 220);
+    clean($('title').text(), 220),
+  );
 
   const bullets: string[] = [];
   const pushBullet = (t?: string | null) => {
@@ -352,10 +362,13 @@ export function extractProductData(html: string, finalUrl: string): ProductData 
 export function findProductLink(html: string, finalUrl: string) {
   const store = detectStore(finalUrl).key;
   if (store === 'mercadolivre') {
+    const unescape = (v: string) => v.replace(/\\u002F/gi, '/').replace(/\\\//g, '/').replace(/&amp;/g, '&');
     const m =
-      html.match(/https:\/\/(?:produto|www)\.mercadolivre\.com\.br\/(?:[^"'\s<>]*?\/)?(?:MLB-?\d{6,}|p\/MLB\d{6,})[^"'\s<>]*/i) ||
-      html.match(/https:\\\/\\\/(?:produto|www)\.mercadolivre\.com\.br\\\/[^"'\s<>]*?MLB-?\d{6,}[^"'\s<>]*/i);
-    return m ? m[0].replace(/\\\//g, '/').replace(/&amp;/g, '&') : null;
+      html.match(/"permalink"\s*:\s*"(https?:[^"]+?MLB-?\d{6,}[^"]*)"/i)?.[1] ||
+      html.match(/https:\/\/(?:produto|www|articulo)\.mercadoli(?:vre|bre)\.com(?:\.br)?\/(?:[^"'\s<>]*?\/)?(?:MLB-?\d{6,}|p\/MLB\d{6,})[^"'\s<>]*/i)?.[0] ||
+      html.match(/https:\\\/\\\/(?:produto|www)\.mercadolivre\.com\.br\\\/[^"'\s<>]*?MLB-?\d{6,}[^"'\s<>]*/i)?.[0] ||
+      html.match(/https:\\u002F\\u002F(?:produto|www)\.mercadolivre\.com\.br[^"'\s<>]*?MLB-?\d{6,}[^"'\s<>]*/i)?.[0];
+    return m ? unescape(m) : null;
   }
   return null;
 }

@@ -32,6 +32,7 @@ import revenueRoutes from './routes/revenue.js';
 import shopRoutes from './routes/shop.js';
 import settingsRoutes from './routes/settings.js';
 import translationsRoutes from './routes/translations.js';
+import { API_FEATURES, API_VERSION, databaseSchemaStatus } from './lib/schema-status.js';
 import mediaRoutes from './routes/media.js';
 import { Redis } from 'ioredis';
 import { redisOptions } from './lib/redis.js';
@@ -58,6 +59,17 @@ export async function buildApp() {
   // Registre o handler ANTES dos plugins de rota. Em Fastify os error handlers são
   // encapsulados pelo contexto de plugin; fazer isso depois pode deixar rotas filhas
   // usando o handler padrão e esconder a causa real atrás de "Internal Server Error".
+  app.setNotFoundHandler((req, reply) => {
+    const isApi = req.url.startsWith('/api/');
+    return reply.code(404).send({
+      error: isApi ? 'Esta função não existe nesta versão da API.' : 'Página não encontrada.',
+      message: isApi ? 'Esta função não existe nesta versão da API.' : 'Página não encontrada.',
+      code: 'ROUTE_NOT_FOUND',
+      path: req.url.split('?')[0],
+      apiVersion: API_VERSION,
+    });
+  });
+
   app.setErrorHandler((error: any, req, reply) => {
     const requestId = String(req.id);
     if (isZodError(error))
@@ -98,15 +110,17 @@ export async function buildApp() {
       return reply
         .code(404)
         .send({ error: 'Registro não encontrado.', message: 'Registro não encontrado.', code, requestId });
-    if (code === 'P2021' || code === 'P2022')
+    if (code === 'P2021' || code === 'P2022') {
+      const what = String((error as any).meta?.table || (error as any).meta?.column || (error as any).meta?.modelName || '');
+      req.log.error({ err: error, requestId, what }, 'Banco sem tabela/coluna esperada');
       return reply.code(503).send({
-        error:
-          'O banco de dados está desatualizado em relação ao projeto. Execute a sincronização/migração do Prisma e reinicie a API.',
-        message:
-          'O banco de dados está desatualizado em relação ao projeto. Execute a sincronização/migração do Prisma e reinicie a API.',
-        code,
+        error: 'Este recurso está temporariamente indisponível. Tente novamente mais tarde.',
+        message: `O banco de dados está desatualizado${what ? ` (falta: ${what})` : ''}. Rode "npm run db:sync" na pasta hypeverso-api com a DATABASE_URL do MySQL remoto.`,
+        code: 'DB_SCHEMA_OUTDATED',
+        missing: what || null,
         requestId,
       });
+    }
     if (code === 'P1001' || code === 'P1002' || code === 'P2024')
       return reply.code(503).send({
         error: 'Banco de dados temporariamente indisponível ou sem conexão livre. Tente novamente em alguns segundos.',
@@ -212,6 +226,14 @@ export async function buildApp() {
   // Imagens servidas do MySQL (MediaAsset); arquivos antigos em disco continuam funcionando.
   registerUploadServing(app);
   app.get('/health', async () => ({ status: 'ok', service: 'nexverse-api', time: new Date().toISOString() }));
+  // Versão + funções disponíveis + tabelas que faltam (o CMS mostra um aviso amigável).
+  app.get('/api/health', async () => ({
+    status: 'ok',
+    version: API_VERSION,
+    features: API_FEATURES,
+    database: await databaseSchemaStatus(),
+    time: new Date().toISOString(),
+  }));
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(mfaRoutes, { prefix: '/api' });
   await app.register(engagementRoutes, { prefix: '/api' });

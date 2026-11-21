@@ -1,3 +1,4 @@
+import { CATALOG_PROVIDERS } from '../services/media-catalog.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
@@ -12,7 +13,7 @@ import {
   searchCatalog,
 } from '../services/media-catalog.js';
 
-const providers = ['TMDB', 'IGDB', 'ANILIST'] as const;
+const providers = CATALOG_PROVIDERS;
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no formato YYYY-MM-DD');
 
 const catalogRoutes: FastifyPluginAsync = async app => {

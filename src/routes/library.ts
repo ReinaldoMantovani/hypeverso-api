@@ -1,3 +1,4 @@
+import { CATALOG_PROVIDERS } from '../services/media-catalog.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
@@ -15,7 +16,7 @@ const statuses = [
   'PLAYING',
   'WANT_TO_PLAY',
 ] as const;
-const providers = ['TMDB', 'IGDB', 'ANILIST'] as const;
+const providers = CATALOG_PROVIDERS;
 
 const libraryRoutes: FastifyPluginAsync = async app => {
   app.get('/library', { preHandler: authenticate }, async req => {

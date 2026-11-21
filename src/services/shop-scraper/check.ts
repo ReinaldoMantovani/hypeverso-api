@@ -1,3 +1,4 @@
+// CÓPIA de hypeverso-cms/lib/server/check.ts (mantenha as duas iguais).
 import { previewProduct } from './preview.js';
 import { FetchProblem } from './fetcher.js';
 
@@ -34,8 +35,14 @@ export function evaluateCheck(
   if (http.blocked && found.priceCents === null)
     return { ...base, status: 'BLOCKED', message: 'A loja pediu verificação anti-robô; tentaremos de novo na próxima rodada.' };
   if (found.available === false) return { ...base, status: 'OUT_OF_STOCK', message: 'Produto esgotado ou anúncio pausado.' };
+  // Página que não deu para ler (montada por JavaScript, anti-robô, instabilidade)
+  // NÃO conta como link quebrado: senão produtos bons seriam escondidos sozinhos.
   if (!found.title && found.priceCents === null)
-    return { ...base, status: 'BROKEN', message: 'A página não mostra mais um produto (link quebrado ou redirecionado).' };
+    return {
+      ...base,
+      status: 'BLOCKED',
+      message: 'Não consegui ler a página do produto agora (a loja pode estar bloqueando robôs). Nova tentativa na próxima rodada.',
+    };
   if (found.priceCents !== null && current.priceCents !== null && found.priceCents !== current.priceCents)
     return {
       ...base,

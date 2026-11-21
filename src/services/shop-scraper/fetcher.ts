@@ -1,3 +1,4 @@
+// CÓPIA de hypeverso-cms/lib/server/fetcher.ts (mantenha as duas iguais).
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
@@ -20,6 +21,17 @@ export const BROWSER_HEADERS: Record<string, string> = {
   'Sec-Fetch-Mode': 'navigate',
   'Sec-Fetch-Site': 'none',
 };
+
+/**
+ * Agentes de "prévia de link". Lojas como a Shopee montam a página por JavaScript
+ * e escondem os dados de robôs comuns, mas entregam título/foto/preço em meta tags
+ * para o WhatsApp e o Facebook mostrarem a prévia do link. Usamos o mesmo caminho.
+ */
+export const LINK_PREVIEW_AGENTS = [
+  'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+  'WhatsApp/2.24.20.80 A',
+  'Twitterbot/1.0',
+];
 
 export class FetchProblem extends Error {
   constructor(
@@ -99,7 +111,7 @@ type FetchResult = { finalUrl: string; status: number; contentType: string; body
 
 export async function fetchFollowing(
   rawUrl: string,
-  opts: { accept?: string; referer?: string; maxBytes?: number; timeoutMs?: number } = {},
+  opts: { accept?: string; referer?: string; maxBytes?: number; timeoutMs?: number; userAgent?: string } = {},
 ): Promise<FetchResult> {
   let current = (await assertPublicUrl(rawUrl)).toString();
   const jar = new Map<string, string>();
@@ -112,6 +124,11 @@ export async function fetchFollowing(
       const headers: Record<string, string> = { ...BROWSER_HEADERS };
       if (opts.accept) headers.Accept = opts.accept;
       if (opts.referer) headers.Referer = opts.referer;
+      if (opts.userAgent) {
+        // Leitores de "prévia de link" (WhatsApp/Facebook) não mandam cabeçalhos de navegador.
+        headers['User-Agent'] = opts.userAgent;
+        for (const k of Object.keys(headers)) if (k.startsWith('Sec-') || k === 'Upgrade-Insecure-Requests') delete headers[k];
+      }
       if (jar.size) headers.Cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
       res = await fetch(current, { headers, redirect: 'manual', signal: controller.signal });
     } catch (error) {

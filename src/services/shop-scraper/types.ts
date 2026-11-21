@@ -1,3 +1,4 @@
+// CÓPIA de hypeverso-cms/lib/server/types.ts (mantenha as duas iguais).
 /** Dados de afiliado configurados no CMS (Configurações › Afiliados). */
 export type AffiliateSettings = {
   amazonTag?: string;

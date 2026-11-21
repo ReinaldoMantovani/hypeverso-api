@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { prisma } from '../db.js';
-import { cacheCatalogItem, getCatalogDetails, mediaTypes } from '../services/media-catalog.js';
+import { CATALOG_PROVIDERS, cacheCatalogItem, getCatalogDetails, mediaTypes } from '../services/media-catalog.js';
 
 export const catalogRefSchema = z.union([
   z.object({ catalogItemId: z.string().min(1).max(40) }),
   z.object({
-    provider: z.enum(['TMDB', 'IGDB', 'ANILIST']),
+    provider: z.enum(CATALOG_PROVIDERS),
     mediaType: z.enum(mediaTypes),
     externalId: z.string().min(1).max(120),
   }),

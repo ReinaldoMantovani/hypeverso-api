@@ -22,7 +22,7 @@ export function applyDatabaseUrlFix() {
   if (fixed === undefined) return;
   process.env.DATABASE_URL = fixed;
   if (!fixed.startsWith('mysql://')) {
-    // eslint-disable-next-line no-console
+     
     console.error(
       `[config] DATABASE_URL inválida: precisa começar com mysql://. Valor recebido ${describeDatabaseUrl(fixed)}.`,
     );

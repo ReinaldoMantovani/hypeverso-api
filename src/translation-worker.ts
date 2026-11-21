@@ -27,6 +27,22 @@ const state = {
   busy: false,
 };
 
+/** Traduz erros técnicos para algo que diga o que fazer. */
+function friendlyWorkerError(error: unknown) {
+  const code = (error as { code?: string })?.code;
+  const msg = error instanceof Error ? error.message : String(error);
+  if (code === 'P2021' || /does not exist in the current database/i.test(msg))
+    return 'Falta a tabela ContentTranslation no banco. No PC, na pasta hypeverso-api, rode "npm run db:sync" (ou o SQL de prisma/sql no phpMyAdmin).';
+  if (code === 'P1001' || /Can't reach database/i.test(msg))
+    return 'Não consegui conectar no MySQL da Hostinger. Confira a DATABASE_URL do .env.worker e se o seu IP está liberado em "MySQL remoto".';
+  if (code === 'P1000' || /Authentication failed/i.test(msg))
+    return 'O MySQL recusou usuário/senha. Confira a DATABASE_URL do .env.worker e o IP liberado em "MySQL remoto".';
+  if (/ECONNREFUSED|fetch failed/i.test(msg) && /11434|ollama/i.test(msg + String((error as any)?.cause?.message || '')))
+    return 'O Ollama não está respondendo. Abra o Docker Desktop e rode o docker compose da IA de novo.';
+  if (/não está instalado no Ollama/i.test(msg)) return `${msg}. Rode: docker compose -f docker-compose.local-ai.yml exec ollama ollama pull <modelo>`;
+  return msg;
+}
+
 let stopping = false;
 let lastScan = 0;
 
@@ -53,9 +69,9 @@ async function loop() {
       if (!worked) await sleep(15_000);
     } catch (error) {
       state.busy = false;
-      state.lastError = error instanceof Error ? error.message : String(error);
+      state.lastError = friendlyWorkerError(error);
       console.error('[traducao] erro:', state.lastError);
-      await sleep(30_000);
+      await sleep(/ContentTranslation|banco/.test(state.lastError) ? 120_000 : 30_000);
     }
   }
 }

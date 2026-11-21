@@ -1,3 +1,4 @@
+// CÓPIA de hypeverso-cms/lib/server/affiliate.ts (mantenha as duas iguais).
 import type { AffiliateSettings } from './types.js';
 
 /**

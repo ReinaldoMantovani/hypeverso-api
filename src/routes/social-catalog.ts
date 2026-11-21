@@ -1,3 +1,4 @@
+import { CATALOG_PROVIDERS } from '../services/media-catalog.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
@@ -105,7 +106,7 @@ const socialCatalogRoutes: FastifyPluginAsync = async app => {
     async (req, reply) => {
       const { provider, type, externalId } = z
         .object({
-          provider: z.enum(['TMDB', 'IGDB', 'ANILIST']),
+          provider: z.enum(CATALOG_PROVIDERS),
           type: z.enum(mediaTypes),
           externalId: z.string().min(1).max(120),
         })

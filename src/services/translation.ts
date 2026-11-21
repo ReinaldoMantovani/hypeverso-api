@@ -545,7 +545,12 @@ export async function processNextTranslation(log: (msg: string) => void = () => 
     });
     log(`${next.entityType} ${next.entityId} → ${next.locale} em ${Math.round((Date.now() - started) / 1000)}s`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const raw = error instanceof Error ? error.message : String(error);
+    const message = /fetch failed|ECONNREFUSED/i.test(raw)
+      ? 'O Ollama não respondeu (está ligado no seu PC?). A tradução será tentada de novo em 20 minutos.'
+      : /JSON/i.test(raw)
+        ? 'A IA devolveu uma resposta fora do formato. A tradução será tentada de novo; se repetir, use um modelo maior (ex.: qwen3:8b).'
+        : raw;
     await prisma.contentTranslation.update({
       where: { id: next.id },
       data: { status: 'FAILED', error: message.slice(0, 2000), lockedAt: null },
